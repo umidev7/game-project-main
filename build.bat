@@ -13,7 +13,7 @@ uv pip install --python ".venv\Scripts\python.exe" -r requirements.txt
 if errorlevel 1 exit /b 1
 
 echo Building NeonRift.exe...
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --name NeonRift space_game.py
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --add-data "assets;assets" --name NeonRift space_game.py
 if errorlevel 1 exit /b 1
 
 if not exist "release" mkdir release

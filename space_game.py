@@ -2,7 +2,9 @@
 
 import math
 import random
+import sys
 from array import array
+from pathlib import Path
 
 import pygame
 
@@ -31,14 +33,26 @@ class Audio:
 			pygame.mixer.init(frequency=44100, size=-16, channels=1, buffer=512)
 			for name, frequency, duration in (("shoot", 660, .07), ("hit", 180, .12), ("explode", 75, .28), ("warning", 120, .55), ("gameover", 90, .8)):
 				self.sounds[name] = self.tone(frequency, duration)
-			self.music = self.tone(55, 2.4)
-			self.music.set_volume(.06)
-			self.music.play(-1)
-			self.ambient_music = self.space_music(8)
-			self.ambient_music.set_volume(.025)
-			self.ambient_music.play(-1)
+			if self.load_music():
+				pygame.mixer.music.set_volume(.055)
+				pygame.mixer.music.play(-1)
+			else:
+				self.music = self.tone(55, 2.4)
+				self.music.set_volume(.055)
+				self.music.play(-1)
 		except pygame.error:
 			pass
+
+	def load_music(self):
+		base_path = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+		music_path = base_path / "assets" / "kill bill.mp3"
+		if not music_path.exists():
+			return False
+		try:
+			pygame.mixer.music.load(str(music_path))
+			return True
+		except pygame.error:
+			return False
 
 	def tone(self, frequency, duration):
 		rate, count = 44100, int(44100 * duration)

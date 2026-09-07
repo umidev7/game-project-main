@@ -1,6 +1,6 @@
 # Neon Rift
 
-Neon Rift is an asset-free single-player Pygame space shooter.
+Neon Rift is a single-player Pygame space shooter with an original dark sci-fi soundtrack.
 
 ## Run From Source
 
