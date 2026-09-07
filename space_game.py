@@ -130,6 +130,36 @@ class EnemyBullet(Bullet):
 		super().__init__(position, velocity, color, damage, radius)
 
 
+class Pickup:
+	SPEED = 125
+
+	def __init__(self, kind):
+		self.kind = kind
+		self.position = pygame.Vector2(random.randint(35, WIDTH - 35), -30)
+		self.alive = True
+
+	def update(self, dt):
+		self.position.y += self.SPEED * dt
+		if self.position.y > HEIGHT + 35:
+			self.alive = False
+
+	def draw(self, surface):
+		x, y = self.position
+		if self.kind == "heart":
+			pygame.draw.circle(surface, RED, (int(x - 8), int(y - 5)), 9)
+			pygame.draw.circle(surface, RED, (int(x + 8), int(y - 5)), 9)
+			pygame.draw.polygon(surface, RED, ((x - 17, y - 2), (x + 17, y - 2), (x, y + 20)))
+			pygame.draw.circle(surface, (255, 170, 190), (int(x - 5), int(y - 7)), 3)
+			text(surface, "+25 HP", pygame.font.Font(None, 18), WHITE, (x, y + 30), True)
+		else:
+			box = pygame.Rect(int(x - 17), int(y - 17), 34, 34)
+			pygame.draw.rect(surface, (84, 40, 20), box)
+			pygame.draw.rect(surface, ORANGE, box, 3)
+			pygame.draw.line(surface, (255, 220, 120), box.midtop, box.midbottom, 3)
+			pygame.draw.line(surface, (255, 220, 120), box.midleft, box.midright, 3)
+			text(surface, "W", pygame.font.Font(None, 20), WHITE, (x, y), True)
+
+
 class Player:
 	def __init__(self):
 		self.position, self.speed = pygame.Vector2(WIDTH / 2, HEIGHT - 82), 390
@@ -148,10 +178,8 @@ class Player:
 		if self.cooldown > 0:
 			return []
 		self.cooldown = max(.1, .22 - self.weapon_level * .025)
-		bullets = [PlayerBullet((self.position.x, self.position.y - 25), (0, -780), damage=self.weapon_level)]
-		if self.weapon_level >= 2:
-			bullets += [PlayerBullet(self.position - (14, 15), (-55, -760), BLUE), PlayerBullet(self.position + (14, -15), (55, -760), BLUE)]
-		return bullets
+		spread = {1: (0,), 2: (-.045, .045), 3: (-.07, 0, .07), 4: (-.095, -.032, .032, .095), 5: (-.12, -.06, 0, .06, .12)}[self.weapon_level]
+		return [PlayerBullet((self.position.x + angle * 85, self.position.y - 25), (angle * 260, -780), BLUE if angle else CYAN) for angle in spread]
 
 	def hit(self, damage):
 		if self.invulnerable > 0:
@@ -277,9 +305,11 @@ class Game:
 
 	def reset(self):
 		self.player, self.bullets, self.enemies = Player(), [], []
+		self.pickups = []
 		self.boss, self.explosions = None, []
 		self.score, self.level, self.spawn_timer, self.level_timer = 0, 1, 0, 0
 		self.boss_warning, self.shake = 0, 0
+		self.pickup_timer = random.uniform(5, 9)
 
 	def start(self):
 		self.reset()
@@ -317,8 +347,14 @@ class Game:
 			if self.spawn_timer <= 0:
 				self.spawn_timer = max(.24, 1 - self.level * .075)
 				self.enemies.append(Enemy(self.level))
+		self.pickup_timer -= dt
+		if self.pickup_timer <= 0:
+			self.pickup_timer = random.uniform(7, 12)
+			self.pickups.append(Pickup(random.choice(("heart", "weapon"))))
 		for bullet in self.bullets:
 			bullet.update(dt)
+		for pickup in self.pickups:
+			pickup.update(dt)
 		for enemy in self.enemies:
 			self.bullets.extend(enemy.update(dt, self.player.position, self.level))
 		if self.boss:
@@ -326,6 +362,7 @@ class Game:
 		self.collisions()
 		self.bullets = [b for b in self.bullets if b.alive]
 		self.enemies = [e for e in self.enemies if e.alive]
+		self.pickups = [pickup for pickup in self.pickups if pickup.alive]
 		if self.player.health <= 0:
 			self.audio.play("gameover")
 			self.explode(self.player.position, CYAN, 1.4)
@@ -373,6 +410,13 @@ class Game:
 				if self.player.hit(18):
 					self.audio.play("hit")
 					self.explode(enemy.position, RED, .7)
+		for pickup in self.pickups:
+			if pickup.alive and pickup.position.distance_to(self.player.position) < 34:
+				pickup.alive = False
+				if pickup.kind == "heart":
+					self.player.health = min(self.player.max_health, self.player.health + 25)
+				else:
+					self.player.weapon_level = min(5, self.player.weapon_level + 1)
 
 	def background(self):
 		self.screen.fill(BG)
@@ -387,6 +431,7 @@ class Game:
 		text(self.screen, f"SCORE  {self.score:06d}", self.font, WHITE, (28, 18))
 		text(self.screen, f"HIGH  {max(self.high_score, self.score):06d}", self.small, (130, 190, 220), (28, 42))
 		text(self.screen, f"LEVEL  {self.level}", self.font, CYAN, (WIDTH // 2, 21), True)
+		text(self.screen, f"WEAPON: x{self.player.weapon_level}", self.small, BLUE, (WIDTH // 2 + 100, 22), True)
 		text(self.screen, "HULL", self.small, WHITE, (WIDTH - 210, 14))
 		pygame.draw.rect(self.screen, (39, 25, 48), (WIDTH - 210, 37, 172, 10))
 		color = GREEN if self.player.health > 45 else ORANGE if self.player.health > 20 else RED
@@ -400,6 +445,8 @@ class Game:
 			enemy.draw(self.screen)
 		if self.boss:
 			self.boss.draw(self.screen)
+		for pickup in self.pickups:
+			pickup.draw(self.screen)
 		self.player.draw(self.screen)
 		for explosion in self.explosions:
 			explosion.draw(self.screen)
@@ -421,6 +468,7 @@ class Game:
 		self.button("START MISSION", pygame.Rect(WIDTH // 2 - 140, 320, 280, 52), True)
 		self.button("QUIT", pygame.Rect(WIDTH // 2 - 140, 390, 280, 52))
 		text(self.screen, f"BEST SCORE  {self.high_score:06d}", self.small, (150, 190, 220), (WIDTH // 2, 535), True)
+		text(self.screen, "Created by Umidjon", self.small, (180, 220, 255), (WIDTH // 2, HEIGHT - 60), True)
 		text(self.screen, "WASD / ARROWS  MOVE     SPACE  FIRE     ESC  PAUSE", self.small, (105, 135, 180), (WIDTH // 2, HEIGHT - 30), True)
 
 	def overlay(self, title, border, restart=False):
@@ -471,10 +519,15 @@ class Game:
 			elif 390 <= y <= 442:
 				pygame.event.post(pygame.event.Event(pygame.QUIT))
 		elif self.state == "paused":
-			self.state = "playing" if 325 <= y <= 377 else "menu" if 395 <= y <= 447 else self.state
+			if 325 <= y <= 377:
+				self.state = "playing"
+			elif 395 <= y <= 447:
+				self.reset()
+				self.state = "menu"
 		elif self.state == "gameover":
 			self.start() if 380 <= y <= 432 else None
 			if 445 <= y <= 497:
+				self.reset()
 				self.state = "menu"
 
 	def run(self):
