@@ -34,6 +34,9 @@ class Audio:
 			self.music = self.tone(55, 2.4)
 			self.music.set_volume(.06)
 			self.music.play(-1)
+			self.ambient_music = self.space_music(8)
+			self.ambient_music.set_volume(.025)
+			self.ambient_music.play(-1)
 		except pygame.error:
 			pass
 
@@ -43,6 +46,22 @@ class Audio:
 		for index in range(count):
 			fade = min(1.0, index / 500, (count - index) / 1800)
 			samples.append(int(32767 * .25 * fade * math.sin(2 * math.pi * frequency * index / rate)))
+		return pygame.mixer.Sound(buffer=samples.tobytes())
+
+	def space_music(self, duration):
+		rate, count = 44100, int(44100 * duration)
+		samples = array("h")
+		for index in range(count):
+			time = index / rate
+			fade = min(1.0, index / 900, (count - index) / 900)
+			pulse = .5 + .5 * math.sin(2 * math.pi * time / 4)
+			value = (
+				.32 * math.sin(2 * math.pi * 55 * time)
+				+ .16 * math.sin(2 * math.pi * 82.5 * time)
+				+ .11 * math.sin(2 * math.pi * 110 * time + pulse)
+				+ .06 * math.sin(2 * math.pi * 220 * time)
+			) * (.5 + pulse * .5)
+			samples.append(int(32767 * .18 * fade * value))
 		return pygame.mixer.Sound(buffer=samples.tobytes())
 
 	def play(self, name):
@@ -151,13 +170,20 @@ class Pickup:
 			pygame.draw.polygon(surface, RED, ((x - 17, y - 2), (x + 17, y - 2), (x, y + 20)))
 			pygame.draw.circle(surface, (255, 170, 190), (int(x - 5), int(y - 7)), 3)
 			text(surface, "+25 HP", pygame.font.Font(None, 18), WHITE, (x, y + 30), True)
-		else:
+		elif self.kind == "weapon":
 			box = pygame.Rect(int(x - 17), int(y - 17), 34, 34)
 			pygame.draw.rect(surface, (84, 40, 20), box)
 			pygame.draw.rect(surface, ORANGE, box, 3)
 			pygame.draw.line(surface, (255, 220, 120), box.midtop, box.midbottom, 3)
 			pygame.draw.line(surface, (255, 220, 120), box.midleft, box.midright, 3)
 			text(surface, "W", pygame.font.Font(None, 20), WHITE, (x, y), True)
+		else:
+			pygame.draw.circle(surface, (28, 28, 42), (int(x), int(y)), 15)
+			pygame.draw.circle(surface, (210, 220, 235), (int(x - 5), int(y - 5)), 4)
+			pygame.draw.circle(surface, (210, 220, 235), (int(x + 5), int(y - 5)), 4)
+			pygame.draw.arc(surface, RED, (int(x - 8), int(y - 1), 16, 12), math.pi, math.tau, 2)
+			pygame.draw.line(surface, ORANGE, (x, y - 15), (x + 5, y - 24), 3)
+			pygame.draw.circle(surface, (255, 220, 120), (int(x + 6), int(y - 25)), 3)
 
 
 class Player:
@@ -178,7 +204,17 @@ class Player:
 		if self.cooldown > 0:
 			return []
 		self.cooldown = max(.1, .22 - self.weapon_level * .025)
-		spread = {1: (0,), 2: (-.045, .045), 3: (-.07, 0, .07), 4: (-.095, -.032, .032, .095), 5: (-.12, -.06, 0, .06, .12)}[self.weapon_level]
+		spread = {
+			1: (0,),
+			2: (-.045, .045),
+			3: (-.07, 0, .07),
+			4: (-.095, -.032, .032, .095),
+			5: (-.12, -.06, 0, .06, .12),
+			6: (-.14, -.084, -.028, .028, .084, .14),
+			7: (-.15, -.1, -.05, 0, .05, .1, .15),
+			8: (-.16, -.114, -.069, -.023, .023, .069, .114, .16),
+			9: (-.17, -.1275, -.085, -.0425, 0, .0425, .085, .1275, .17),
+		}[self.weapon_level]
 		return [PlayerBullet((self.position.x + angle * 85, self.position.y - 25), (angle * 260, -780), BLUE if angle else CYAN) for angle in spread]
 
 	def hit(self, damage):
@@ -258,8 +294,11 @@ class Boss:
 		self.cooldown -= dt
 		shots = []
 		if self.cooldown <= 0:
-			self.cooldown = max(.35, 1.05 - self.level * .015)
-			for angle in (-.3, -.12, 0, .12, .3):
+			self.cooldown = max(.25, 1.05 - self.level * .02)
+			angles = (-.3, -.12, 0, .12, .3)
+			if self.level >= 5:
+				angles = (-.38, -.25, -.12, 0, .12, .25, .38)
+			for angle in angles:
 				shots.append(EnemyBullet(self.position + (0, 45), (math.sin(angle), math.cos(angle)), PINK, 12, 5))
 				shots[-1].velocity *= 245 + self.level * 6
 		return shots
@@ -310,6 +349,7 @@ class Game:
 		self.score, self.level, self.spawn_timer, self.level_timer = 0, 1, 0, 0
 		self.boss_warning, self.shake = 0, 0
 		self.pickup_timer = random.uniform(5, 9)
+		self.temporary_bullets = []
 
 	def start(self):
 		self.reset()
@@ -328,6 +368,8 @@ class Game:
 			return
 		keys = pygame.key.get_pressed()
 		self.player.update(dt, keys)
+		self.temporary_bullets = [remaining - dt for remaining in self.temporary_bullets if remaining - dt > 0]
+		self.player.weapon_level = 1 + len(self.temporary_bullets)
 		if keys[pygame.K_SPACE]:
 			shots = self.player.shoot()
 			if shots:
@@ -345,12 +387,15 @@ class Game:
 		if self.boss is None:
 			self.spawn_timer -= dt
 			if self.spawn_timer <= 0:
-				self.spawn_timer = max(.24, 1 - self.level * .075)
-				self.enemies.append(Enemy(self.level))
+				late_round = max(0, self.level - 4)
+				self.spawn_timer = max(.18, 1 - self.level * .075 - late_round * .06)
+				spawn_count = 1 + (1 if self.level >= 5 and random.random() < .35 else 0)
+				self.enemies.extend(Enemy(self.level) for _ in range(spawn_count))
 		self.pickup_timer -= dt
 		if self.pickup_timer <= 0:
-			self.pickup_timer = random.uniform(7, 12)
-			self.pickups.append(Pickup(random.choice(("heart", "weapon"))))
+			late_round = max(0, self.level - 4)
+			self.pickup_timer = random.uniform(max(5, 7 - late_round * .25), max(8, 12 - late_round * .35))
+			self.pickups.append(Pickup(random.choices(("heart", "weapon", "bomb"), (5, 4, 2 + late_round))[0]))
 		for bullet in self.bullets:
 			bullet.update(dt)
 		for pickup in self.pickups:
@@ -398,7 +443,6 @@ class Game:
 				self.explode(bullet.position, PINK, .2)
 				if self.boss.health <= 0:
 					self.score += 500 * self.level
-					self.player.weapon_level = min(3, self.player.weapon_level + 1)
 					self.audio.play("explode")
 					self.explode(self.boss.position, PINK, 2.4)
 					self.shake, self.boss = 1.3, None
@@ -415,8 +459,14 @@ class Game:
 				pickup.alive = False
 				if pickup.kind == "heart":
 					self.player.health = min(self.player.max_health, self.player.health + 25)
+				elif pickup.kind == "weapon":
+					if len(self.temporary_bullets) < 8:
+						self.temporary_bullets.append(20)
+						self.player.weapon_level = 1 + len(self.temporary_bullets)
 				else:
-					self.player.weapon_level = min(5, self.player.weapon_level + 1)
+					self.player.health = 0
+					self.explode(self.player.position, RED, 1.4)
+					return
 
 	def background(self):
 		self.screen.fill(BG)
